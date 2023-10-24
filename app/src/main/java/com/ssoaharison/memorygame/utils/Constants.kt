@@ -2,6 +2,8 @@ package com.ssoaharison.memorygame.utils
 
 import com.ssoaharison.memorygame.R
 
+const val EXTRA_BOARD_SIZE = "EXTRA_BOARD_SIZE"
+const val EXTRA_GAME_NAME = "EXTRA_GAME_NAME"
 val DEFAULT_ICONS = listOf(
     R.drawable.ic_face,
     R.drawable.ic_flower,
