@@ -1,7 +1,9 @@
 package com.ssoaharison.memorygame
 
 import android.animation.ArgbEvaluator
+import android.app.Activity
 import android.content.Intent
+import android.graphics.Color
 import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
 import android.util.Log
@@ -9,15 +11,22 @@ import android.view.LayoutInflater
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
+import android.widget.EditText
 import android.widget.RadioGroup
 import androidx.appcompat.app.AlertDialog
 import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.GridLayoutManager
+import com.github.jinatonic.confetti.CommonConfetti
 import com.google.android.material.snackbar.Snackbar
+import com.google.firebase.Firebase
+import com.google.firebase.firestore.firestore
+import com.squareup.picasso.Picasso
 import com.ssoaharison.memorygame.databinding.ActivityMainBinding
 import com.ssoaharison.memorygame.models.BoardSize
 import com.ssoaharison.memorygame.models.MemoryGame
+import com.ssoaharison.memorygame.models.UserImageList
 import com.ssoaharison.memorygame.utils.EXTRA_BOARD_SIZE
+import com.ssoaharison.memorygame.utils.EXTRA_GAME_NAME
 
 class MainActivity : AppCompatActivity() {
 
@@ -29,7 +38,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var gameAdapter: MemoryBoardAdapter
     private lateinit var memoryGame: MemoryGame
     private lateinit var binding: ActivityMainBinding
+
     private var boardSize: BoardSize = BoardSize.EASY
+    private val db = Firebase.firestore
+    private var gameName: String? = null
+    private var customGameImages: List<String>? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -63,8 +76,53 @@ class MainActivity : AppCompatActivity() {
                 showCreationDialog()
                 return true
             }
+            R.id.mi_download -> {
+                showDownloadDialog()
+                return true
+            }
         }
         return super.onOptionsItemSelected(item)
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (requestCode == CREATE_REQUEST_CODE && resultCode == Activity.RESULT_OK) {
+            val customGameName = data?.getStringExtra(EXTRA_GAME_NAME)
+            if (customGameName == null) {
+                Log.e(TAG, "Got null custom game from CreateActivity")
+                return
+            }
+            downloadGame(customGameName)
+        }
+        super.onActivityResult(requestCode, resultCode, data)
+    }
+
+    private fun showDownloadDialog() {
+        val boardDownloadView = LayoutInflater.from(this).inflate(R.layout.dialog_download_board, null)
+        showAlertDialog("Fetch memory game", boardDownloadView, View.OnClickListener {
+            val etDownloadGame = boardDownloadView.findViewById<EditText>(R.id.etDownloadGame)
+            val gameToDownload = etDownloadGame.text.toString()
+            downloadGame(gameToDownload)
+        })
+    }
+
+    private fun downloadGame(customGameName: String) {
+        db.collection("games").document(customGameName).get().addOnSuccessListener { document ->
+            val userImageList = document.toObject(UserImageList::class.java)
+            if (userImageList?.images == null) {
+                Log.e(TAG, "Invalid custom game data from Firestore")
+                Snackbar.make(binding.clRoot, "Sorry, we couldn't find such game, '$customGameName'", Snackbar.LENGTH_LONG).show()
+                return@addOnSuccessListener
+            }
+            val numCards = userImageList.images.size * 2
+            boardSize = BoardSize.getByValue(numCards)
+            customGameImages = userImageList.images
+            userImageList.images.forEach {Picasso.get().load(it).fetch()}
+            Snackbar.make(binding.clRoot, "You're now playing '$customGameName'!", Snackbar.LENGTH_LONG).show()
+            gameName = customGameName
+            setupBoard()
+        }.addOnFailureListener { exception ->
+            Log.e(TAG, "Exception when retrieving game", exception)
+        }
     }
 
     private fun showCreationDialog() {
@@ -96,6 +154,8 @@ class MainActivity : AppCompatActivity() {
                 R.id.rbMedium -> BoardSize.MEDIUM
                 else -> BoardSize.HARD
             }
+            gameName = null
+            customGameImages = null
             setupBoard()
         })
     }
@@ -111,6 +171,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupBoard() {
+        supportActionBar?.title = gameName ?: getString(R.string.app_name)
         when (boardSize) {
             BoardSize.EASY -> {
                 binding.tvNumMoves.text = "Easy: 4 x 2"
@@ -126,7 +187,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
         binding.tvNumPairs.setTextColor(ContextCompat.getColor(this, R.color.color_progress_none))
-        memoryGame = MemoryGame(boardSize)
+        memoryGame = MemoryGame(boardSize, customGameImages)
         gameAdapter = MemoryBoardAdapter(
             this@MainActivity,
             boardSize,
@@ -161,6 +222,7 @@ class MainActivity : AppCompatActivity() {
             binding.tvNumPairs.text = "Pairs: ${memoryGame.numPairsFound} / ${boardSize.getNumPairs()}"
             if (memoryGame.haveWonGame()) {
                 Snackbar.make(binding.clRoot, "You won! Congratulations.", Snackbar.LENGTH_LONG).show()
+                CommonConfetti.rainingConfetti(binding.clRoot, intArrayOf(Color.YELLOW, Color.GREEN, Color.MAGENTA))
             }
         }
         val color = ArgbEvaluator().evaluate(
